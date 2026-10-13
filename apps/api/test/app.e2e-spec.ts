@@ -14,6 +14,7 @@ import { Analysis, Candidate, LlmProvider, SCORING_QUEUE, ScoringStatus, Stage, 
 import { ScoringService } from '../../worker/src/scoring.service';
 import { WorkerModule } from '../../worker/src/worker.module';
 import { ScoringProducer } from '../src/candidates/scoring.producer';
+import { ScoringWatchdog } from '../src/candidates/scoring.watchdog';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/main';
 
@@ -377,6 +378,72 @@ describe('HireFlow (e2e)', () => {
       expect(c.analysis.unverifiedEvidence).toBe(1);
       expect(c.analysis.reviewReason).toMatch(/not found in the resume/);
       expect(c.events.at(-1)).toMatchObject({ actor: 'system', toStage: 'NEEDS_REVIEW' });
+    });
+
+    it('holds a candidate when one matched skill has no supporting quote', async () => {
+      const id = await insertPending('Partial Pat');
+      const svc = new ScoringService(
+        ds,
+        fixedProvider({
+          ...result(92, 'dashboard in React and TypeScript'),
+          matchedSkills: ['React', 'Kafka'],
+          evidence: [
+            { skill: 'React', quote: 'dashboard in React and TypeScript' },
+            { skill: 'Kafka', quote: 'for 2,000 users' }, // real text, says nothing about Kafka
+          ],
+        }),
+      );
+      await svc.score(id, 1);
+      const c = (await http.get(`/api/candidates/${id}`)).body;
+      expect(c.stage).toBe('NEEDS_REVIEW');
+      expect(c.analysis.unverifiedEvidence).toBe(0);
+      expect(c.analysis.unsupportedSkills).toEqual(['Kafka']);
+      expect(c.analysis.reviewReason).toMatch(/1 of 2 matched skills .*Kafka/);
+      expect(c.outreachDraft).toBeNull();
+    });
+
+    it('records a claim failure on the final attempt, but never for a newer version', async () => {
+      const id = await insertPending('Outage Omar');
+      const svc = new ScoringService(ds, fixedProvider(result(90, 'React and TypeScript')));
+      await svc.markFailedUnclaimed(id, 0, new Error('wrong version')); // no-op
+      expect((await http.get(`/api/candidates/${id}`)).body.scoringStatus).toBe('PENDING');
+      await svc.markFailedUnclaimed(id, 1, new Error('ECONNREFUSED'));
+      const c = (await http.get(`/api/candidates/${id}`)).body;
+      expect(c.scoringStatus).toBe('FAILED');
+      expect(c.scoringError).toMatch(/Could not start scoring: ECONNREFUSED/);
+    });
+
+    it('watchdog fails stuck scoring but leaves fresh runs and undelivered events alone', async () => {
+      const stuck = await insertPending('Stuck Stu');
+      const fresh = await insertPending('Fresh Fred');
+      const waiting = await insertPending('Waiting Wen');
+      await ds.query(
+        `UPDATE candidates SET scoring_status = 'PROCESSING', updated_at = now() - interval '20 minutes' WHERE id = $1`,
+        [stuck],
+      );
+      await ds.query(`UPDATE candidates SET scoring_status = 'PROCESSING' WHERE id = $1`, [fresh]);
+      await ds.query(`UPDATE candidates SET updated_at = now() - interval '20 minutes' WHERE id = $1`, [waiting]);
+      // An outbox event that hasn't reached Redis yet: still deliverable, so not stuck.
+      await ds.query(
+        `INSERT INTO outbox_events (type, payload, published_at) VALUES ('resume.uploaded', $1, NULL)`,
+        [JSON.stringify({ candidateId: waiting, version: 1 })],
+      );
+
+      const recovered = await app.get(ScoringWatchdog).sweep(15);
+      expect(recovered).toEqual([stuck]);
+
+      const s1 = (await http.get(`/api/candidates/${stuck}`)).body;
+      expect(s1.scoringStatus).toBe('FAILED');
+      expect(s1.scoringError).toMatch(/did not finish within 15 minutes/);
+      expect((await http.get(`/api/candidates/${fresh}`)).body.scoringStatus).toBe('PROCESSING');
+      expect((await http.get(`/api/candidates/${waiting}`)).body.scoringStatus).toBe('PENDING');
+
+      // A slow worker that wakes up after recovery can't write over it...
+      const svc = new ScoringService(ds, fixedProvider(result(95, 'React and TypeScript')));
+      expect(await svc.claim(stuck, 1)).toBeNull();
+      // ...and the recruiter can retry.
+      await http.post(`/api/candidates/${stuck}/rescore`).expect(201);
+      await ds.query(`DELETE FROM outbox_events WHERE payload->>'candidateId' = $1`, [waiting]);
     });
 
     it('auto-advances the same score when the evidence checks out', async () => {

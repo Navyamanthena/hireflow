@@ -119,11 +119,25 @@ export function CandidatePanel(props: {
                 <>
                   <h3>From the resume</h3>
                   <ul className="evidence">
-                    {c.analysis.evidence.map((e, i) => (
-                      <li key={i}>
-                        <span className="chip chip-match">{e.skill}</span>
-                        <q>{e.quote}</q>
+                    {groupByQuote(c.analysis.evidence).map(([quote, skills]) => (
+                      <li key={quote}>
+                        <span className="chips">
+                          {skills.map((s) => (
+                            <span key={s} className="chip chip-match">{s}</span>
+                          ))}
+                        </span>
+                        <q>{quote}</q>
                       </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {!!c.analysis.unsupportedSkills?.length && (
+                <>
+                  <h3>Claimed without a supporting quote</h3>
+                  <ul className="chips">
+                    {c.analysis.unsupportedSkills.map((s) => (
+                      <li key={s} className="chip chip-miss">{s}</li>
                     ))}
                   </ul>
                 </>
@@ -220,4 +234,15 @@ function describeScorer(scoredBy: string | null) {
   const [provider, model] = scoredBy.split(':');
   const name = provider === 'anthropic' ? 'Anthropic' : provider === 'openai' ? 'OpenAI' : provider;
   return `${name} ${model ?? ''}`.trim();
+}
+
+/** Show each quote once, with every skill it supports. */
+function groupByQuote(evidence: { skill: string; quote: string }[]): [string, string[]][] {
+  const map = new Map<string, string[]>();
+  for (const e of evidence) {
+    const skills = map.get(e.quote) ?? [];
+    if (!skills.includes(e.skill)) skills.push(e.skill);
+    map.set(e.quote, skills);
+  }
+  return [...map.entries()];
 }

@@ -50,7 +50,18 @@ describe('evidence gate', () => {
   it('never auto-advances on matched skills with zero verified quotes', () => {
     const d = decideNextStage({ ...analysis(95), evidence: [] }, rules, candidate, 'SWE');
     expect(d.toStage).toBe(Stage.NEEDS_REVIEW);
-    expect(d.reason).toMatch(/cited no quote/);
+    expect(d.reason).toMatch(/1 of 1 matched skills have no supporting resume quote/);
+  });
+
+  it('never auto-advances when any single matched skill is unsupported', () => {
+    const d = decideNextStage(
+      { ...analysis(95, ['React', 'Kafka']), unsupportedSkills: ['Kafka'] },
+      rules,
+      candidate,
+      'SWE',
+    );
+    expect(d.toStage).toBe(Stage.NEEDS_REVIEW);
+    expect(d.reason).toMatch(/1 of 2 matched skills .*\(Kafka\)/);
   });
 
   it('also holds mid-range scores instead of marking them SCREENED', () => {
@@ -61,6 +72,10 @@ describe('evidence gate', () => {
 
   it('accepts no evidence when nothing was claimed', () => {
     expect(evidenceProblem({ ...analysis(10, []), evidence: [] })).toBeNull();
+  });
+
+  it('accepts fully supported claims', () => {
+    expect(evidenceProblem({ ...analysis(95, ['React']), unsupportedSkills: [] })).toBeNull();
   });
 });
 

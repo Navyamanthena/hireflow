@@ -23,7 +23,24 @@ export class ScoringProcessor extends WorkerHost {
     const attempt = job.attemptsMade + 1;
     const maxAttempts = job.opts.attempts ?? 1;
 
-    const token = await this.scoring.claim(candidateId, version);
+    let token: string | null;
+    try {
+      token = await this.scoring.claim(candidateId, version);
+    } catch (error) {
+      // e.g. database unreachable. BullMQ retries with backoff; on the final
+      // attempt, try to surface the failure so the UI doesn't stay "Scoring…".
+      this.logger.warn(
+        JSON.stringify({ event: `${job.name}.claim_error`, candidateId, version, attempt, maxAttempts, error: String(error) }),
+      );
+      if (attempt >= maxAttempts) {
+        await this.scoring.markFailedUnclaimed(candidateId, version, error).catch((e) =>
+          this.logger.error(
+            JSON.stringify({ event: 'scoring.mark_failed_unclaimed.error', candidateId, error: String(e) }),
+          ),
+        );
+      }
+      throw error;
+    }
     if (!token) {
       const outcome = { kind: 'skipped', reason: 'superseded, deleted or already finished' };
       this.logger.log(JSON.stringify({ event: job.name, candidateId, version, attempt, outcome }));

@@ -13,7 +13,7 @@ Rules:
 - Judge only job-relevant skills and experience. Never use or infer name, gender, age, nationality, ethnicity or other protected traits.
 - Every reason must cite concrete evidence from the resume or say what is missing.
 - Do not invent skills the resume does not show.
-- Evidence quotes must be copied VERBATIM from the resume (max 200 characters each). Quotes that do not appear in the resume are discarded.
+- Give at least one evidence quote for EACH matched skill. Quotes must be copied VERBATIM from the resume (max 200 characters each) and must mention the skill. Invented or irrelevant quotes are detected; unsupported claims send the candidate to human review.
 
 Return exactly this shape:
 {
@@ -22,7 +22,7 @@ Return exactly this shape:
   "matchedSkills": ["<skill required by the job AND shown in resume>", ...],
   "missingSkills": ["<skill required by the job but NOT shown in resume>", ...],
   "reasons": ["<evidence-based reason>", ... up to 5],
-  "evidence": [{"skill": "<a matched skill>", "quote": "<verbatim resume excerpt>"}, ... up to 6]
+  "evidence": [{"skill": "<a matched skill>", "quote": "<verbatim resume excerpt mentioning it>"}, ... one or more per matched skill]
 }`;
 
 export function buildUserPrompt(jobDescription: string, resumeText: string): string {

@@ -6,6 +6,8 @@ export * from './entities/outbox-event.entity';
 export * from './llm/analysis.schema';
 export * from './llm/llm-provider';
 export * from './llm/heuristic.provider';
+export * from './llm/skills';
+export * from './llm/evidence';
 export * from './rules/rules-engine';
 export * from './queue/queue.constants';
 export * from './database';

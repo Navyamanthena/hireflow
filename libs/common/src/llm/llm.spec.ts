@@ -1,4 +1,5 @@
-import { parseAnalysis, verifyEvidence } from './analysis.schema';
+import { parseAnalysis } from './analysis.schema';
+import { quoteSupportsSkill, verifyEvidence } from './evidence';
 import { HeuristicProvider } from './heuristic.provider';
 import {
   AnthropicProvider,
@@ -169,11 +170,51 @@ describe('verifyEvidence', () => {
     expect(out.unverifiedEvidence).toBe(1);
   });
 
-  it('heuristic evidence always survives verification', async () => {
-    const text = 'Skills\nBuilt services in Node.js and NestJS with PostgreSQL';
-    const r = await new HeuristicProvider().analyze('Node.js, NestJS, PostgreSQL', text);
-    expect(r.evidence.length).toBeGreaterThan(0);
-    expect(verifyEvidence(r, text).unverifiedEvidence).toBe(0);
+  it('heuristic evidence always survives verification, for every matched skill', async () => {
+    const text = 'Skills\nBuilt services in Node.js and NestJS with PostgreSQL\nMetrics with Prometheus';
+    const r = await new HeuristicProvider().analyze('Node.js, NestJS, PostgreSQL, observability', text);
+    const v = verifyEvidence(r, text);
+    expect(v.matchedSkills).toHaveLength(4);
+    expect(v.unverifiedEvidence).toBe(0);
+    expect(v.unsupportedSkills).toEqual([]);
+  });
+
+  it('flags a matched skill whose only quote is real but about something else', () => {
+    const out = verifyEvidence(
+      {
+        ...valid,
+        matchedSkills: ['React', 'Kafka'],
+        evidence: [
+          { skill: 'React', quote: 'chat app with React/TypeScript' },
+          { skill: 'Kafka', quote: 'Redis Pub/Sub fan-out' }, // real quote, wrong skill
+        ],
+      },
+      resume,
+    );
+    expect(out.unverifiedEvidence).toBe(0);
+    expect(out.unsupportedSkills).toEqual(['Kafka']);
+  });
+
+  it('accepts a quote labelled with a different skill if it mentions the claimed one', () => {
+    const out = verifyEvidence(
+      { ...valid, matchedSkills: ['TypeScript'], evidence: [{ skill: 'React', quote: 'React/TypeScript' }] },
+      resume,
+    );
+    expect(out.unsupportedSkills).toEqual([]);
+  });
+});
+
+describe('quoteSupportsSkill', () => {
+  it.each([
+    ['Observability', 'Exposed Prometheus metrics', true], // alias pattern
+    ['Node.js', 'services in Node.js', true],
+    ['JavaScript', 'services in Node.js', false], // not fooled by ".js"
+    ['REST APIs', 'Designed a RESTful API', true], // prefix match, plural stripped
+    ['GraphQL Federation', 'Built a GraphQL gateway', true], // unknown skill, token match
+    ['Data modeling', 'Managed data pipelines', false], // generic word alone is not enough
+    ['Kafka', 'Redis Pub/Sub fan-out', false],
+  ])('%s <- "%s" => %s', (skill, quote, expected) => {
+    expect(quoteSupportsSkill(skill, quote)).toBe(expected);
   });
 });
 

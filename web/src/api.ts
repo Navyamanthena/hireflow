@@ -40,6 +40,7 @@ export interface Analysis {
   reasons: string[];
   evidence?: { skill: string; quote: string }[];
   unverifiedEvidence?: number;
+  unsupportedSkills?: string[];
   reviewReason?: string;
 }
 

@@ -15,8 +15,9 @@ export interface WorkflowDecision {
 /**
  * Can the AI's claims be checked against the resume?
  * - Any quote the model invented (not found in the resume) is a red flag.
- * - Claiming matched skills while offering no verifiable quote is too.
- * Returns a human-readable problem, or null if the evidence holds up.
+ * - Every matched skill needs a real quote that mentions it.
+ * Expects an analysis that went through verifyEvidence(). Returns a
+ * human-readable problem, or null if the evidence holds up.
  */
 export function evidenceProblem(analysis: Analysis): string | null {
   const unverified = analysis.unverifiedEvidence ?? 0;
@@ -24,8 +25,11 @@ export function evidenceProblem(analysis: Analysis): string | null {
   if (unverified > 0) {
     return `${unverified} of ${unverified + verified} AI-cited quotes were not found in the resume`;
   }
-  if (analysis.matchedSkills.length > 0 && verified === 0) {
-    return 'AI claimed matching skills but cited no quote from the resume';
+  const unsupported =
+    analysis.unsupportedSkills ?? (verified === 0 ? analysis.matchedSkills : []);
+  if (unsupported.length > 0) {
+    const list = unsupported.slice(0, 4).join(', ') + (unsupported.length > 4 ? '…' : '');
+    return `${unsupported.length} of ${analysis.matchedSkills.length} matched skills have no supporting resume quote (${list})`;
   }
   return null;
 }

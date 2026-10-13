@@ -156,6 +156,22 @@ export class ScoringService {
     );
   }
 
+  /**
+   * Last-resort failure marking when no token was ever issued (the claim
+   * itself kept failing, e.g. during a database outage). Guarded by version so
+   * it can't touch a newer scoring request. If the database is still down this
+   * fails too, and the API's ScoringWatchdog recovers the row later.
+   */
+  async markFailedUnclaimed(candidateId: string, version: number, error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    await this.dataSource.query(
+      `UPDATE candidates
+          SET scoring_status = 'FAILED', scoring_error = $3, scoring_attempt = NULL, updated_at = now()
+        WHERE id = $1 AND scoring_version = $2 AND scoring_status IN ('PENDING', 'PROCESSING')`,
+      [candidateId, version, `Could not start scoring: ${message}`.slice(0, 500)],
+    );
+  }
+
   static isPermanent(error: unknown): boolean {
     return error instanceof PermanentLlmError;
   }

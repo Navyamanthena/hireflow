@@ -16,13 +16,15 @@ export const AnalysisSchema = z.object({
   matchedSkills: z.array(z.string().min(1).max(80)).max(40),
   missingSkills: z.array(z.string().min(1).max(80)).max(40),
   reasons: z.array(z.string().min(1).max(300)).min(1).max(6),
-  evidence: z.array(EvidenceSchema).max(10).default([]),
+  evidence: z.array(EvidenceSchema).max(40).default([]),
 });
 
 export type Evidence = z.infer<typeof EvidenceSchema>;
 export type Analysis = z.infer<typeof AnalysisSchema> & {
   /** How many model-supplied quotes were dropped because they are not in the resume. */
   unverifiedEvidence?: number;
+  /** Matched skills with no real resume quote that mentions them. */
+  unsupportedSkills?: string[];
   /** Set when automation was withheld because the AI's claims couldn't be verified. */
   reviewReason?: string;
 };
@@ -49,27 +51,4 @@ export function parseAnalysis(raw: string): Analysis {
     throw new Error(`LLM response failed validation: ${result.error.issues[0]?.message}`);
   }
   return result.data;
-}
-
-const normalize = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[–—]/g, '-')
-    .replace(/[^\S\n]+|\n+/g, ' ')
-    .trim();
-
-/**
- * Keep only quotes that actually appear in the resume. A model can invent a
- * convincing quote; this makes every excerpt shown to a recruiter checkable.
- */
-export function verifyEvidence(analysis: Analysis, resumeText: string): Analysis {
-  const haystack = normalize(resumeText);
-  const verified = analysis.evidence.filter((e) => haystack.includes(normalize(e.quote)));
-  return {
-    ...analysis,
-    evidence: verified,
-    unverifiedEvidence: analysis.evidence.length - verified.length,
-  };
 }

@@ -7,6 +7,7 @@ import { CandidatesController } from './candidates.controller';
 import { CandidatesService } from './candidates.service';
 import { OutboxRelay } from './outbox.relay';
 import { ScoringProducer } from './scoring.producer';
+import { ScoringWatchdog } from './scoring.watchdog';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { ScoringProducer } from './scoring.producer';
     JobsModule,
   ],
   controllers: [CandidatesController],
-  providers: [CandidatesService, ScoringProducer, OutboxRelay],
-  exports: [ScoringProducer, OutboxRelay],
+  providers: [CandidatesService, ScoringProducer, OutboxRelay, ScoringWatchdog],
+  exports: [ScoringProducer, OutboxRelay, ScoringWatchdog],
 })
 export class CandidatesModule {}

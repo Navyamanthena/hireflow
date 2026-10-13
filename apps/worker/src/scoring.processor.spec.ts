@@ -8,11 +8,16 @@ function makeJob(attemptsMade: number, attempts = 4) {
 }
 
 describe('ScoringProcessor retry policy', () => {
-  let scoring: { claim: jest.Mock; run: jest.Mock; markFailed: jest.Mock };
+  let scoring: { claim: jest.Mock; run: jest.Mock; markFailed: jest.Mock; markFailedUnclaimed: jest.Mock };
   let processor: ScoringProcessor;
 
   beforeEach(() => {
-    scoring = { claim: jest.fn().mockResolvedValue('tok-1'), run: jest.fn(), markFailed: jest.fn() };
+    scoring = {
+      claim: jest.fn().mockResolvedValue('tok-1'),
+      run: jest.fn(),
+      markFailed: jest.fn(),
+      markFailedUnclaimed: jest.fn().mockResolvedValue(undefined),
+    };
     processor = new ScoringProcessor(scoring as unknown as ScoringService);
     jest.spyOn((processor as any).logger, 'warn').mockImplementation(() => undefined);
     jest.spyOn((processor as any).logger, 'log').mockImplementation(() => undefined);
@@ -47,6 +52,26 @@ describe('ScoringProcessor retry policy', () => {
     scoring.claim.mockResolvedValue(null);
     await expect(processor.process(makeJob(0))).resolves.toMatchObject({ kind: 'skipped' });
     expect(scoring.run).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed claim without marking anything before the last attempt', async () => {
+    scoring.claim.mockRejectedValue(new Error('ECONNREFUSED postgres'));
+    await expect(processor.process(makeJob(1))).rejects.toThrow('ECONNREFUSED');
+    expect(scoring.markFailedUnclaimed).not.toHaveBeenCalled();
+    expect(scoring.run).not.toHaveBeenCalled();
+  });
+
+  it('marks the candidate failed when the claim fails on the final attempt', async () => {
+    scoring.claim.mockRejectedValue(new Error('ECONNREFUSED postgres'));
+    await expect(processor.process(makeJob(3))).rejects.toThrow('ECONNREFUSED');
+    expect(scoring.markFailedUnclaimed).toHaveBeenCalledWith('c1', 3, expect.any(Error));
+  });
+
+  it('still fails the job (for the watchdog) if marking failed also errors', async () => {
+    scoring.claim.mockRejectedValue(new Error('db down'));
+    scoring.markFailedUnclaimed.mockRejectedValue(new Error('db still down'));
+    jest.spyOn((processor as any).logger, 'error').mockImplementation(() => undefined);
+    await expect(processor.process(makeJob(3))).rejects.toThrow('db down');
   });
 
   it('returns the outcome on success', async () => {
