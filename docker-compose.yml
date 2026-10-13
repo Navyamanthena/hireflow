@@ -31,7 +31,14 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env to a random string of 32+ characters}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
-    ports: ["3000:3000"]
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-10}
+      # Browsers reach the API only through the web container's nginx, which
+      # sets X-Forwarded-For; trust exactly that one hop.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    # Published on localhost only, so nobody can bypass nginx and spoof
+    # X-Forwarded-For from another machine. Use :8080 from browsers.
+    ports: ["127.0.0.1:3000:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

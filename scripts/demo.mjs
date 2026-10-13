@@ -16,6 +16,7 @@ const arg = (name, fallback) => {
 };
 const API = arg('api', process.env.HIREFLOW_API ?? 'http://localhost:3000/api').replace(/\/$/, '');
 const OUT = arg('out', 'scripts/demo-report.md');
+const WAIT_SECONDS = Number(arg('wait', '300'));
 
 const ROLE = {
   title: 'Software Engineer, New Grad (demo)',
@@ -97,7 +98,7 @@ async function main() {
   console.log(`Added ${created.length} synthetic candidates. Waiting for scoring...`);
 
   let results = [];
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < Math.max(1, WAIT_SECONDS / 2); i++) {
     results = await Promise.all(created.map((c) => call(`/candidates/${c.id}`, { token })));
     const done = results.filter((c) => c.scoringStatus === 'SCORED' || c.scoringStatus === 'FAILED').length;
     process.stdout.write(`\r  ${done}/${results.length} scored`);
@@ -106,6 +107,7 @@ async function main() {
   }
   const wallSeconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log('\n');
+  const unfinished = results.filter((c) => c.scoringStatus !== 'SCORED' && c.scoringStatus !== 'FAILED');
 
   const rows = created.map((c, i) => {
     const r = results[i];
@@ -140,6 +142,7 @@ async function main() {
     `Scored by: ${[...new Set(rows.map((r) => r.scoredBy))].join(', ')}`,
     `Wall time for ${rows.length} resumes: ${wallSeconds}s (avg time to first decision: ${metrics.avgSecondsToScreen ?? '-'}s)`,
     `Failed: ${rows.filter((r) => r.status === 'FAILED').length}`,
+    `Unfinished when the ${WAIT_SECONDS}s wait ran out: ${unfinished.length}${unfinished.length ? ` (${unfinished.map((c) => c.name).join(', ')})` : ''}`,
     `Auto-advanced to phone screen: ${rows.filter((r) => r.stage === 'PHONE_SCREEN').length}`,
     `Held for human review because of evidence problems: ${rows.filter((r) => r.held).length}`,
     `Invented quotes dropped: ${rows.reduce((n, r) => n + r.invented, 0)}`,
@@ -147,7 +150,16 @@ async function main() {
   ];
   console.log('\n' + summary.join('\n'));
 
+  const failed = rows.filter((r) => r.status === 'FAILED');
+  const complete = unfinished.length === 0 && failed.length === 0;
+  const verdict = complete
+    ? 'COMPLETE: every candidate was scored.'
+    : `INCOMPLETE: ${unfinished.length} unfinished, ${failed.length} failed. Check the worker logs (docker compose logs worker) and the LLM key.`;
+  console.log(`\n${verdict}`);
+
   const md = `# HireFlow demo run
+
+**${verdict}**
 
 ${new Date().toISOString()} · API ${API} · ${scoring.demoMode ? 'keyword demo mode (no AI)' : `${scoring.provider} ${scoring.model}`}
 
@@ -161,6 +173,7 @@ ${summary.map((s) => `- ${s}`).join('\n')}
 `;
   writeFileSync(OUT, md);
   console.log(`\nReport saved to ${OUT}`);
+  if (!complete) process.exitCode = 1; // a partial run must not look like a success
 }
 
 main().catch((e) => {

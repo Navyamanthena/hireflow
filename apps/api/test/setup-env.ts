@@ -7,3 +7,4 @@ process.env.QUEUE_PREFIX = 'hireflow-e2e'; // isolated from any running dev work
 process.env.JWT_SECRET = 'e2e-test-secret-that-is-at-least-32-characters-long';
 process.env.AUTH_RATE_LIMIT = '25';
 process.env.ALLOW_SIGNUP = 'true';
+process.env.TRUST_PROXY = '1'; // as in docker-compose: one proxy hop (nginx)

@@ -621,6 +621,16 @@ describe('HireFlow (e2e)', () => {
       }
       expect(statuses).toContain(429);
       expect(statuses.filter((s) => s === 401).length).toBeLessThanOrEqual(25);
+
+      // Behind the proxy, a different client (its IP in X-Forwarded-For) has
+      // its own allowance: one user's lockout doesn't lock out everyone.
+      await anon
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', '203.0.113.9')
+        .send({ email: 'ada@acme.test', password: 'correct-horse-battery' })
+        .expect(200);
+      // The locked-out client stays locked out.
+      await anon.post('/api/auth/login').send({ email: 'ada@acme.test', password: 'correct-horse-battery' }).expect(429);
     });
   });
 });

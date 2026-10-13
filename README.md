@@ -71,7 +71,7 @@ cp .env.example .env          # optionally add ANTHROPIC_API_KEY or OPENAI_API_K
 docker compose up --build
 ```
 
-Set `JWT_SECRET` in `.env` first (any random string of 32+ characters). Then open http://localhost:8080 and click **Set up a team** to create your admin account. The API is on :3000, and Compose starts two worker replicas.
+Set `JWT_SECRET` in `.env` first (any random string of 32+ characters). Then open http://localhost:8080 and click **Set up a team** to create your admin account. Compose starts two worker replicas. Browsers use :8080, where nginx forwards the real client IP. The API's own port 3000 is published on localhost only, so nothing outside your computer can bypass nginx.
 
 On Windows, `start-hireflow.cmd` (kept next to the zip, not in this repo) does all of this, including generating the secret.
 
@@ -103,7 +103,7 @@ LLM_MODEL=...                                          # optional override
 npm run demo -- --api http://localhost:3000/api      # or: docker compose run --rm --no-deps -v ./scripts:/scripts api node /scripts/demo.mjs --api http://api:3000/api
 ```
 
-This creates a demo team, a sample role and 12 invented resumes: strong, medium and weak fits, plus one prompt-injection attempt and one keyword-stuffed skills list. It waits for scoring, then prints a table and writes `scripts/demo-report.md`. In keyword demo mode, the keyword-stuffed resume scores highest. That's the failure mode the LLM provider and evidence checks exist to fix, so run it with a real key and compare.
+It exits with status 1, and the report says INCOMPLETE, if any candidate is still unscored when the wait (`--wait`, 300 s by default) runs out, or if any scoring failed. This creates a demo team, a sample role and 12 invented resumes: strong, medium and weak fits, plus one prompt-injection attempt and one keyword-stuffed skills list. It waits for scoring, then prints a table and writes `scripts/demo-report.md`. In keyword demo mode, the keyword-stuffed resume scores highest. That's the failure mode the LLM provider and evidence checks exist to fix, so run it with a real key and compare.
 
 ## Tests
 
@@ -146,6 +146,10 @@ Everything except `/api/health`, `/api/config` and the login and sign-up routes 
 **Authorization is deny-by-default.** A global NestJS guard requires a valid token on every route. Only health, config, login and sign-up are marked `@Public()`. The token only identifies the user: their organization and role are **re-read from the database on every request**, so removing a team member or changing their role takes effect immediately, not when their token expires.
 
 **Multi-tenancy.** Every job belongs to an organization, and candidates inherit tenancy from their job. Every query is filtered by the caller's org, and anything belonging to another org returns **404, not 403**, so its IDs can't even be confirmed to exist. A cross-tenant test hits every endpoint with another org's token, including upload, move, rescore and delete. Removing the org filter from a single query makes it fail.
+
+**Rate limiting behind a proxy.** Login limits are per client IP. Behind nginx every request would otherwise come from nginx's IP, so all users would share one allowance. nginx sets `X-Forwarded-For`, and the API trusts exactly one proxy hop (`TRUST_PROXY=1`, set by Compose). `TRUST_PROXY=true` is refused because it would let any client spoof its IP. A test checks that one locked-out client doesn't lock out another.
+
+**Upgrading an existing database.** The auth migration moves roles that existed before sign-in into a memberless "Legacy data" organization. After signing up, an admin claims them with `npm run claim-legacy -- you@example.com` (add `--dry-run` to preview). In Docker, run `docker compose run --rm --no-deps -v ./scripts:/scripts api node /scripts/claim-legacy.mjs you@example.com`.
 
 **Roles.** *Recruiters* open roles, add and move candidates, rescore and edit rules. *Admins* can also delete roles and candidates and manage the team. Manual stage moves record which user made them.
 
