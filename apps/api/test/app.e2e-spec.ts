@@ -18,10 +18,7 @@ import { ScoringWatchdog } from '../src/candidates/scoring.watchdog';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/main';
 
-process.env.DATABASE_URL ??= 'postgres://hireflow:hireflow@localhost:5432/hireflow_test';
-process.env.LLM_PROVIDER = 'heuristic';
-process.env.OUTBOX_RELAY_INTERVAL_MS = '200';
-process.env.QUEUE_PREFIX = 'hireflow-e2e'; // isolated from any running dev worker
+// Env for this suite is set in setup-env.ts (runs before imports).
 
 const JD = `Full-stack engineer. TypeScript, Node.js, NestJS, React, PostgreSQL,
 REST APIs, Docker, CI/CD, AWS. Interest in AI / LLM products.`;
@@ -32,17 +29,33 @@ const WEAK = 'Retail associate experienced with cash handling, inventory and cus
 describe('HireFlow (e2e)', () => {
   let app: INestApplication;
   let worker: INestApplicationContext;
-  let http: ReturnType<typeof request>;
+  /** Signed in as the admin of organization A (default for most tests). */
+  let http: ReturnType<typeof request.agent>;
+  /** No credentials. */
+  let anon: ReturnType<typeof request>;
+  let server: any;
+  let tokenA: string;
+  let adminA: { id: string; org: { id: string } };
   let jobId: string;
+
+  const as = (token: string) => request.agent(server).set('Authorization', `Bearer ${token}`);
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = configureApp(moduleRef.createNestApplication());
     await app.init();
     const ds = app.get(DataSource);
-    await ds.query('TRUNCATE outbox_events, stage_events, candidates, jobs CASCADE');
+    await ds.query('TRUNCATE outbox_events, stage_events, candidates, jobs, users, organizations CASCADE');
     worker = await NestFactory.createApplicationContext(WorkerModule, { logger: false });
-    http = request(app.getHttpServer());
+    server = app.getHttpServer();
+    anon = request(server);
+    const reg = await anon
+      .post('/api/auth/register')
+      .send({ orgName: 'Acme Hiring', name: 'Ada Admin', email: 'ada@acme.test', password: 'correct-horse-battery' })
+      .expect(201);
+    tokenA = reg.body.token;
+    adminA = reg.body.user;
+    http = as(tokenA);
   });
 
   afterAll(async () => {
@@ -60,9 +73,9 @@ describe('HireFlow (e2e)', () => {
   }
 
   it('reports healthy dependencies and the scoring mode', async () => {
-    const res = await http.get('/api/health').expect(200);
+    const res = await anon.get('/api/health').expect(200); // probes need no token
     expect(res.body).toMatchObject({ status: 'ok', database: true, redis: true, outboxPending: 0 });
-    const cfg = await http.get('/api/config').expect(200);
+    const cfg = await anon.get('/api/config').expect(200);
     expect(cfg.body.scoring).toMatchObject({ provider: 'heuristic', demoMode: true });
   });
 
@@ -475,6 +488,139 @@ describe('HireFlow (e2e)', () => {
       expect(c.stage).toBe('PHONE_SCREEN');
       expect(c.outreachDraft).toContain('Hi Verified');
       expect(c.analysis.reviewReason).toBeUndefined();
+    });
+  });
+
+  describe('authentication and tenant isolation', () => {
+    let tokenB: string;
+    let candidateA: string;
+
+    beforeAll(async () => {
+      const reg = await anon
+        .post('/api/auth/register')
+        .send({ orgName: 'Rival Corp', name: 'Bo Admin', email: 'bo@rival.test', password: 'another-long-password' })
+        .expect(201);
+      tokenB = reg.body.token;
+      const list = await http.get(`/api/jobs/${jobId}/candidates`).expect(200);
+      candidateA = list.body[0].id;
+    });
+
+    it('rejects requests without a valid token', async () => {
+      await anon.get('/api/jobs').expect(401);
+      await anon.get(`/api/candidates/${candidateA}`).expect(401);
+      await anon.post(`/api/jobs/${jobId}/candidates`).send({ name: 'x', resumeText: 'y'.repeat(40) }).expect(401);
+      await as('not-a-jwt').get('/api/jobs').expect(401);
+      await as(tokenA.slice(0, -2) + 'xx').get('/api/jobs').expect(401); // tampered signature
+      const { JwtService } = await import('@nestjs/jwt');
+      const forged = await new JwtService({ secret: 'some-other-secret-that-is-32-chars-long!' }).signAsync({
+        sub: adminA.id,
+        org: adminA.org.id,
+      });
+      await as(forged).get('/api/jobs').expect(401);
+    });
+
+    it('returns the signed-in user without secrets', async () => {
+      const me = await http.get('/api/auth/me').expect(200);
+      expect(me.body).toMatchObject({ email: 'ada@acme.test', role: 'admin', org: { name: 'Acme Hiring' } });
+      expect(JSON.stringify(me.body)).not.toMatch(/password|scrypt/i);
+    });
+
+    it('validates sign-up and refuses duplicate emails', async () => {
+      await anon
+        .post('/api/auth/register')
+        .send({ orgName: 'Dup', name: 'Dup', email: 'ADA@acme.test', password: 'long-enough-password' })
+        .expect(409);
+      await anon
+        .post('/api/auth/register')
+        .send({ orgName: 'Weak', name: 'Weak', email: 'weak@x.test', password: 'short' })
+        .expect(400);
+    });
+
+    it('gives the same answer for an unknown email and a wrong password', async () => {
+      const wrong = await anon.post('/api/auth/login').send({ email: 'ada@acme.test', password: 'nope-nope-nope' });
+      const unknown = await anon.post('/api/auth/login').send({ email: 'ghost@acme.test', password: 'nope-nope-nope' });
+      expect(wrong.status).toBe(401);
+      expect(unknown.status).toBe(401);
+      expect(wrong.body.message).toBe(unknown.body.message);
+      const ok = await anon.post('/api/auth/login').send({ email: 'Ada@Acme.test', password: 'correct-horse-battery' });
+      expect(ok.status).toBe(200);
+      expect(ok.body.token).toBeTruthy();
+    });
+
+    it("never shows or changes another organization's data", async () => {
+      const b = as(tokenB);
+      expect((await b.get('/api/jobs').expect(200)).body).toEqual([]);
+      await b.get(`/api/jobs/${jobId}`).expect(404);
+      await b.get(`/api/jobs/${jobId}/metrics`).expect(404);
+      await b.get(`/api/jobs/${jobId}/candidates`).expect(404);
+      await b.patch(`/api/jobs/${jobId}`).send({ advanceThreshold: 1, reviewThreshold: 0 }).expect(404);
+      await b.delete(`/api/jobs/${jobId}`).expect(404);
+      await b.post(`/api/jobs/${jobId}/candidates`).send({ name: 'Spy', resumeText: 'z'.repeat(40) }).expect(404);
+      await b
+        .post(`/api/jobs/${jobId}/candidates/upload`)
+        .field('name', 'Spy')
+        .attach('file', Buffer.from('resume text that is long enough to parse'), 'cv.txt')
+        .expect(404);
+      await b.get(`/api/candidates/${candidateA}`).expect(404);
+      await b.patch(`/api/candidates/${candidateA}/stage`).send({ stage: 'REJECTED' }).expect(404);
+      await b.post(`/api/candidates/${candidateA}/rescore`).expect(404);
+      await b.delete(`/api/candidates/${candidateA}`).expect(404);
+
+      // Organization A's data is untouched.
+      const job = await http.get(`/api/jobs/${jobId}`).expect(200);
+      expect(job.body.advanceThreshold).toBe(80);
+      const c = await http.get(`/api/candidates/${candidateA}`).expect(200);
+      expect(c.body.stage).not.toBe('REJECTED');
+      expect((await http.get(`/api/jobs/${jobId}/candidates`)).body.some((x: any) => x.name === 'Spy')).toBe(false);
+    });
+
+    it('records which team member made a manual move', async () => {
+      const target = (await http.get(`/api/jobs/${jobId}/candidates?stage=NEEDS_REVIEW`)).body[0].id;
+      const res = await http.patch(`/api/candidates/${target}/stage`).send({ stage: 'SCREENED' }).expect(200);
+      expect(res.body.events.at(-1)).toMatchObject({ actor: 'user', userId: adminA.id, toStage: 'SCREENED' });
+    });
+
+    it('enforces roles, and removing a member revokes access immediately', async () => {
+      await http
+        .post('/api/team')
+        .send({ name: 'Remy Recruiter', email: 'remy@acme.test', password: 'temporary-password-1' })
+        .expect(201);
+      const login = await anon
+        .post('/api/auth/login')
+        .send({ email: 'remy@acme.test', password: 'temporary-password-1' })
+        .expect(200);
+      expect(login.body.user).toMatchObject({ role: 'recruiter', org: { id: adminA.org.id } });
+      const remy = as(login.body.token);
+
+      // Recruiters do the day-to-day work...
+      await remy.get(`/api/jobs/${jobId}`).expect(200);
+      const added = await remy
+        .post(`/api/jobs/${jobId}/candidates`)
+        .send({ name: 'Added By Remy', resumeText: 'React and TypeScript engineer, five years.' })
+        .expect(201);
+      // ...but can't delete records or manage the team.
+      await remy.delete(`/api/candidates/${added.body.id}`).expect(403);
+      await remy.delete(`/api/jobs/${jobId}`).expect(403);
+      await remy.post('/api/team').send({ name: 'x', email: 'x@acme.test', password: 'whatever-long-1' }).expect(403);
+      await http.delete(`/api/candidates/${added.body.id}`).expect(204);
+
+      // Another org's admin can't remove Remy; Remy's own admin can.
+      const team = (await http.get('/api/team').expect(200)).body;
+      const remyId = team.find((m: any) => m.email === 'remy@acme.test').id;
+      await as(tokenB).delete(`/api/team/${remyId}`).expect(404);
+      await http.delete(`/api/team/${adminA.id}`).expect(400); // can't remove yourself
+      await http.delete(`/api/team/${remyId}`).expect(204);
+      await remy.get('/api/jobs').expect(401); // token still unexpired, access already gone
+    });
+
+    // Keep last: it uses up this client's login allowance for the minute.
+    it('rate-limits repeated login attempts', async () => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 30; i++) {
+        statuses.push((await anon.post('/api/auth/login').send({ email: 'ada@acme.test', password: `guess-${i}-xxxx` })).status);
+      }
+      expect(statuses).toContain(429);
+      expect(statuses.filter((s) => s === 401).length).toBeLessThanOrEqual(25);
     });
   });
 });

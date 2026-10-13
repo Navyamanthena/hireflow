@@ -1,9 +1,49 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, Job, ScoringConfig } from './api';
+import { api, Job, ScoringConfig, session, Session, SIGNED_OUT_EVENT, User } from './api';
+import { AuthScreen } from './AuthScreen';
 import { JobView } from './JobView';
 import { NewJobForm } from './NewJobForm';
+import { TeamDialog } from './TeamDialog';
 
+/** Auth gate: restores the session on load and drops back to sign-in when the API rejects it. */
 export function App() {
+  const [me, setMe] = useState<User | null>(null);
+  const [checking, setChecking] = useState(!!session.token());
+
+  useEffect(() => {
+    if (session.token()) {
+      api.me().then(setMe, () => session.set(null)).finally(() => setChecking(false));
+    }
+    const onSignedOut = () => setMe(null);
+    window.addEventListener(SIGNED_OUT_EVENT, onSignedOut);
+    return () => window.removeEventListener(SIGNED_OUT_EVENT, onSignedOut);
+  }, []);
+
+  if (checking) return <p className="muted pad">Loading…</p>;
+  if (!me) {
+    return (
+      <AuthScreen
+        onSignedIn={(s: Session) => {
+          session.set(s.token);
+          setMe(s.user);
+        }}
+      />
+    );
+  }
+  return (
+    <Workspace
+      key={me.id}
+      me={me}
+      onSignOut={() => {
+        session.set(null);
+        setMe(null);
+      }}
+    />
+  );
+}
+
+function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
+  const [showTeam, setShowTeam] = useState(false);
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -64,6 +104,23 @@ export function App() {
           + New role
         </button>
 
+        <div className="account">
+          <div className="account-who">
+            <strong>{me.name}</strong>
+            <span>
+              {me.org.name}, {me.role === 'admin' ? 'admin' : 'recruiter'}
+            </span>
+          </div>
+          <div className="row">
+            <button className="btn btn-ghost small" onClick={() => setShowTeam(true)}>
+              Team
+            </button>
+            <button className="btn btn-ghost small" onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
+        </div>
+
         <select
           className="job-select"
           aria-label="Choose role"
@@ -114,11 +171,13 @@ export function App() {
           <JobView
             key={selected.id}
             job={selected}
+            canDelete={me.role === 'admin'}
             onJobChange={(j) => setJobs((prev) => prev?.map((x) => (x.id === j.id ? j : x)) ?? null)}
             onDeleted={load}
           />
         )}
       </main>
+      {showTeam && <TeamDialog me={me} onClose={() => setShowTeam(false)} />}
     </div>
   );
 }

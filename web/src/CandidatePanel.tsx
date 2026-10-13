@@ -3,6 +3,7 @@ import { api, Candidate, Stage, STAGES, stageLabel } from './api';
 
 export function CandidatePanel(props: {
   id: string;
+  canDelete: boolean;
   onClose: () => void;
   onChanged: () => void;
   onDeleted: () => void;
@@ -208,6 +209,7 @@ export function CandidatePanel(props: {
             <button className="btn btn-ghost" disabled={pending} onClick={() => act(() => api.rescore(c.id))}>
               Score again
             </button>
+            {props.canDelete && (
             <button
               className="btn btn-danger"
               onClick={async () => {
@@ -221,6 +223,7 @@ export function CandidatePanel(props: {
             >
               Delete candidate
             </button>
+            )}
           </div>
         </>
       )}

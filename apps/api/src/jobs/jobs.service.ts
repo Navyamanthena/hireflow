@@ -18,37 +18,43 @@ export interface JobMetrics {
 export class JobsService {
   constructor(@InjectRepository(Job) private readonly jobs: Repository<Job>) {}
 
-  async create(dto: CreateJobDto): Promise<Job> {
-    const job = this.jobs.create(dto);
+  /*
+   * Every method takes the caller's orgId and filters by it. A job from
+   * another organization is reported as "not found", never "forbidden", so
+   * ids from other tenants can't even be confirmed to exist.
+   */
+
+  async create(orgId: string, dto: CreateJobDto): Promise<Job> {
+    const job = this.jobs.create({ ...dto, orgId });
     this.assertThresholds(job);
     return this.jobs.save(job);
   }
 
-  findAll(): Promise<Job[]> {
-    return this.jobs.find({ order: { createdAt: 'DESC' } });
+  findAll(orgId: string): Promise<Job[]> {
+    return this.jobs.find({ where: { orgId }, order: { createdAt: 'DESC' } });
   }
 
-  async findOne(id: string): Promise<Job> {
-    const job = await this.jobs.findOne({ where: { id } });
+  async findOne(id: string, orgId: string): Promise<Job> {
+    const job = await this.jobs.findOne({ where: { id, orgId } });
     if (!job) throw new NotFoundException(`Job ${id} not found`);
     return job;
   }
 
-  async update(id: string, dto: UpdateJobDto): Promise<Job> {
-    const job = await this.findOne(id);
+  async update(id: string, orgId: string, dto: UpdateJobDto): Promise<Job> {
+    const job = await this.findOne(id, orgId);
     Object.assign(job, dto);
     this.assertThresholds(job);
     return this.jobs.save(job);
   }
 
-  async remove(id: string): Promise<void> {
-    const res = await this.jobs.delete(id);
+  async remove(id: string, orgId: string): Promise<void> {
+    const res = await this.jobs.delete({ id, orgId });
     if (!res.affected) throw new NotFoundException(`Job ${id} not found`);
   }
 
   /** Aggregates computed in SQL so the work scales with the DB, not the API process. */
-  async metrics(id: string): Promise<JobMetrics> {
-    await this.findOne(id);
+  async metrics(id: string, orgId: string): Promise<JobMetrics> {
+    await this.findOne(id, orgId);
     const manager = this.jobs.manager;
 
     const stageRows: { stage: Stage; count: string }[] = await manager.query(

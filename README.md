@@ -2,7 +2,7 @@
 
 An AI-powered candidate screening workflow. Recruiters open a role, add resumes (PDF or text), and an LLM scores each candidate against the job description. A rules engine then moves candidates through the hiring pipeline automatically: strong fits go to phone screen with an outreach email drafted, and weak fits go to a human for review. Automation never rejects anyone and never overrides a recruiter's decision.
 
-> **Status: portfolio project, not production-ready.** There is no authentication yet (see [Security](#security)), so don't host it with real candidate data.
+> **Status: portfolio project.** It has authentication, org-scoped multi-tenancy and roles (see [Security](#security)), but no password reset, email verification or audited deployment yet. Demo it with synthetic resumes.
 
 **Stack:** TypeScript · Node.js · NestJS · React · PostgreSQL (TypeORM) · Redis + BullMQ · Docker · GitHub Actions · Anthropic / OpenAI APIs
 
@@ -71,7 +71,9 @@ cp .env.example .env          # optionally add ANTHROPIC_API_KEY or OPENAI_API_K
 docker compose up --build
 ```
 
-Open http://localhost:8080. The API is on :3000. Compose starts two worker replicas.
+Set `JWT_SECRET` in `.env` first (any random string of 32+ characters). Then open http://localhost:8080 and click **Set up a team** to create your admin account. The API is on :3000, and Compose starts two worker replicas.
+
+On Windows, `start-hireflow.cmd` (kept next to the zip, not in this repo) does all of this, including generating the secret.
 
 ### Locally
 
@@ -108,8 +110,14 @@ Real Anthropic/OpenAI calls are covered by mocked-HTTP contract tests only. Run 
 
 ## API
 
+Everything except `/api/health`, `/api/config` and the login and sign-up routes needs `Authorization: Bearer <token>`.
+
 | Method | Path | |
 |---|---|---|
+| `POST` | `/api/auth/register` | Create an organization and its first admin `{orgName, name, email, password}` (public) |
+| `POST` | `/api/auth/login` | `{email, password}` returns `{token, user}` (public, rate-limited) |
+| `GET` | `/api/auth/me` | The signed-in user and their organization |
+| `GET` · `POST` · `DELETE` | `/api/team` · `/api/team/:id` | List members (any member); add or remove members (admin only) |
 | `POST` | `/api/jobs` | Open a role `{title, description, advanceThreshold?, reviewThreshold?}` |
 | `GET` | `/api/jobs` · `/api/jobs/:id` | List / get roles |
 | `PATCH` | `/api/jobs/:id` | Update title, description or thresholds |
@@ -125,15 +133,19 @@ Real Anthropic/OpenAI calls are covered by mocked-HTTP contract tests only. Run 
 
 ## Security
 
-**Not implemented yet: authentication and authorization.** Anyone who can reach the API can read resumes, move candidates and delete records. Before hosting real candidate data, add:
+**Authentication.** Email and password sign-in. Passwords are hashed with scrypt, a memory-hard function built into Node, using a per-user salt. Sessions are HS256 JWTs (8 hours by default). Login returns the same error, after similar work, whether the email is unknown or the password is wrong, so attackers can't use it to discover accounts. Login and sign-up are rate-limited per IP. In production the API refuses to start without a 32+ character `JWT_SECRET`.
 
-- Login (OIDC or email + password) and JWT verification with a global NestJS guard
-- Org-scoped data: an `org_id` on jobs, enforced in every query, plus role checks (recruiter vs. admin) for destructive actions
-- Rate limiting on uploads, and retention and deletion policies for resume data
+**Authorization is deny-by-default.** A global NestJS guard requires a valid token on every route. Only health, config, login and sign-up are marked `@Public()`. The token only identifies the user: their organization and role are **re-read from the database on every request**, so removing a team member or changing their role takes effect immediately, not when their token expires.
+
+**Multi-tenancy.** Every job belongs to an organization, and candidates inherit tenancy from their job. Every query is filtered by the caller's org, and anything belonging to another org returns **404, not 403**, so its IDs can't even be confirmed to exist. A cross-tenant test hits every endpoint with another org's token, including upload, move, rescore and delete. Removing the org filter from a single query makes it fail.
+
+**Roles.** *Recruiters* open roles, add and move candidates, rescore and edit rules. *Admins* can also delete roles and candidates and manage the team. Manual stage moves record which user made them.
+
+**Known gaps:** no password reset, email verification or MFA. No refresh tokens, so you sign in again after 8 hours. The web app keeps the token in `localStorage`. An httpOnly cookie would hide it from page scripts at the cost of CSRF handling. Resume retention and deletion policies are not defined.
 
 ## Roadmap
 
-- Auth and multi-tenant orgs (see Security)
+- Password reset, email verification and invitations by email
 - Run against a real LLM on a labelled resume set and report agreement with human decisions
 - Bull Board UI for inspecting the dead-letter queue
 - Prometheus metrics endpoint on the worker (LLM latency, failure rate)

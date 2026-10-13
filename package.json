@@ -21,7 +21,9 @@
     "@nestjs/common": "^11.2.7",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.2.7",
+    "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.2.7",
+    "@nestjs/throttler": "^6.7.1",
     "@nestjs/typeorm": "^11.0.3",
     "bullmq": "^5.0.0",
     "class-transformer": "^0.5.1",
@@ -53,12 +55,23 @@
     "typescript": "^5.9.3"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": ".",
     "testRegex": ".*\\.spec\\.ts$",
-    "transform": { "^.+\\.ts$": "ts-jest" },
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    },
     "testEnvironment": "node",
-    "roots": ["<rootDir>/apps/", "<rootDir>/libs/"],
-    "moduleNameMapper": { "^@app/common(|/.*)$": "<rootDir>/libs/common/src/$1" }
+    "roots": [
+      "<rootDir>/apps/",
+      "<rootDir>/libs/"
+    ],
+    "moduleNameMapper": {
+      "^@app/common(|/.*)$": "<rootDir>/libs/common/src/$1"
+    }
   }
 }

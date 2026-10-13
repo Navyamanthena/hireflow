@@ -4,7 +4,12 @@ import { api, CandidateSummary, Job, Metrics, Stage, STAGES } from './api';
 import { CandidatePanel } from './CandidatePanel';
 import { ScoreCard } from './ScoreCard';
 
-export function JobView(props: { job: Job; onJobChange: (j: Job) => void; onDeleted: () => void }) {
+export function JobView(props: {
+  job: Job;
+  canDelete: boolean;
+  onJobChange: (j: Job) => void;
+  onDeleted: () => void;
+}) {
   const { job } = props;
   const [candidates, setCandidates] = useState<CandidateSummary[] | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
@@ -167,6 +172,7 @@ export function JobView(props: { job: Job; onJobChange: (j: Job) => void; onDele
       {openId && (
         <CandidatePanel
           id={openId}
+          canDelete={props.canDelete}
           onClose={() => setOpenId(null)}
           onChanged={refresh}
           onDeleted={() => {

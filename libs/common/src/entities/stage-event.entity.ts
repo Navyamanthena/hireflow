@@ -38,6 +38,10 @@ export class StageEvent {
   @Column({ length: 16 })
   actor: Actor;
 
+  /** Which team member made a manual move (null for system moves). */
+  @Column('uuid', { name: 'user_id', nullable: true })
+  userId: string | null;
+
   @Column('text', { nullable: true })
   reason: string | null;
 

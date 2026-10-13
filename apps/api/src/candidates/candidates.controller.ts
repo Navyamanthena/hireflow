@@ -20,6 +20,8 @@ import {
   MoveStageDto,
   UploadCandidateDto,
 } from './candidates.dto';
+import { Role } from '@app/common';
+import { AuthUser, CurrentUser, Roles } from '../auth/auth.decorators';
 import { CandidatesService } from './candidates.service';
 import { extractResumeText, MAX_RESUME_BYTES } from './resume-text';
 
@@ -28,45 +30,56 @@ export class CandidatesController {
   constructor(private readonly candidates: CandidatesService) {}
 
   @Post('jobs/:jobId/candidates')
-  create(@Param('jobId', ParseUUIDPipe) jobId: string, @Body() dto: CreateCandidateDto) {
-    return this.candidates.create(jobId, dto);
+  create(
+    @CurrentUser() user: AuthUser,
+    @Param('jobId', ParseUUIDPipe) jobId: string,
+    @Body() dto: CreateCandidateDto,
+  ) {
+    return this.candidates.create(user, jobId, dto);
   }
 
   @Post('jobs/:jobId/candidates/upload')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_RESUME_BYTES, files: 1 } }))
   async upload(
+    @CurrentUser() user: AuthUser,
     @Param('jobId', ParseUUIDPipe) jobId: string,
     @Body() dto: UploadCandidateDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
+    await this.candidates.assertJobAccess(jobId, user.orgId); // before spending time parsing
     if (!file) throw new BadRequestException('Attach a resume file in the "file" field');
     const resumeText = await extractResumeText(file);
-    return this.candidates.create(jobId, { ...dto, resumeText });
+    return this.candidates.create(user, jobId, { ...dto, resumeText });
   }
 
   @Get('jobs/:jobId/candidates')
-  list(@Param('jobId', ParseUUIDPipe) jobId: string, @Query() query: ListCandidatesQuery) {
-    return this.candidates.listForJob(jobId, query.stage);
+  list(
+    @CurrentUser() user: AuthUser,
+    @Param('jobId', ParseUUIDPipe) jobId: string,
+    @Query() query: ListCandidatesQuery,
+  ) {
+    return this.candidates.listForJob(user.orgId, jobId, query.stage);
   }
 
   @Get('candidates/:id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.candidates.findOne(id);
+  findOne(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.candidates.findOne(id, user.orgId);
   }
 
   @Patch('candidates/:id/stage')
-  move(@Param('id', ParseUUIDPipe) id: string, @Body() dto: MoveStageDto) {
-    return this.candidates.moveStage(id, dto);
+  move(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: MoveStageDto) {
+    return this.candidates.moveStage(user, id, dto);
   }
 
   @Post('candidates/:id/rescore')
-  rescore(@Param('id', ParseUUIDPipe) id: string) {
-    return this.candidates.rescore(id);
+  rescore(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.candidates.rescore(user, id);
   }
 
   @Delete('candidates/:id')
+  @Roles(Role.ADMIN)
   @HttpCode(204)
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.candidates.remove(id);
+  remove(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.candidates.remove(user.orgId, id);
   }
 }

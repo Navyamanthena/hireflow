@@ -92,29 +92,89 @@ export interface Metrics {
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  constructor(message: string, readonly status = 0) {
+    super(message);
+  }
+}
+
+export type Role = 'admin' | 'recruiter';
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  org: { id: string; name: string };
+}
+export interface Session {
+  token: string;
+  user: User;
+}
+
+/*
+ * Session token, kept in localStorage so a reload stays signed in.
+ * Trade-off (noted in the README): an httpOnly cookie would keep the token
+ * away from page scripts, at the cost of CSRF handling.
+ */
+const TOKEN_KEY = 'hireflow.token';
+let token: string | null = (() => {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+})();
+
+export const session = {
+  token: () => token,
+  set(next: string | null) {
+    token = next;
+    try {
+      if (next) localStorage.setItem(TOKEN_KEY, next);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage unavailable: session lasts until reload */
+    }
+  },
+};
+
+/** Fired when the API rejects the token, so the app can return to sign-in. */
+export const SIGNED_OUT_EVENT = 'hireflow:signed-out';
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const isForm = init?.body instanceof FormData;
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
+  if (!isForm && init?.body) headers['content-type'] = 'application/json';
+  if (token) headers.authorization = `Bearer ${token}`;
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: isForm || !init?.body ? init?.headers : { 'content-type': 'application/json', ...init?.headers },
-    });
+    res = await fetch(`${BASE}${path}`, { ...init, headers });
   } catch {
     throw new ApiError('Can’t reach the API. Check that it is running on port 3000.');
+  }
+  if (res.status === 401 && token && !path.startsWith('/auth/')) {
+    session.set(null);
+    window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
   }
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = Array.isArray(body.message) ? body.message.join('. ') : body.message;
-    throw new ApiError(msg ?? `Request failed (${res.status})`);
+    throw new ApiError(msg ?? `Request failed (${res.status})`, res.status);
   }
   return body as T;
 }
 
 export const api = {
+  register: (data: { orgName: string; name: string; email: string; password: string }) =>
+    call<Session>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  login: (data: { email: string; password: string }) =>
+    call<Session>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+  me: () => call<User>('/auth/me'),
+  listTeam: () => call<User[]>('/team'),
+  addMember: (data: { name: string; email: string; password: string; role: Role }) =>
+    call<User>('/team', { method: 'POST', body: JSON.stringify(data) }),
+  removeMember: (id: string) => call<void>(`/team/${id}`, { method: 'DELETE' }),
   config: () => call<{ scoring: ScoringConfig }>('/config'),
   listJobs: () => call<Job[]>('/jobs'),
   createJob: (data: { title: string; description: string }) =>

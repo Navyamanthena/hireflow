@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthModule } from './auth/auth.module';
 import { CandidatesModule } from './candidates/candidates.module';
 import { HealthModule } from './health/health.module';
 import { JobsModule } from './jobs/jobs.module';
@@ -17,6 +18,7 @@ import { JobsModule } from './jobs/jobs.module';
     BullModule.forRootAsync({
       useFactory: () => ({ connection: redisConnection(), prefix: queuePrefix() }),
     }),
+    AuthModule,
     JobsModule,
     CandidatesModule,
     HealthModule,

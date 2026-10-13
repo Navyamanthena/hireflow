@@ -273,3 +273,30 @@ a { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before { animation: none !important; transition: none !important; }
 }
+
+/* Auth */
+.auth { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; }
+.auth-card { width: min(420px, 100%); }
+.auth-brand { padding: 0; margin-bottom: 28px; }
+.auth-card h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.025em; }
+.auth-card .lede { margin: 8px 0 22px; }
+.btn.wide { width: 100%; padding: 10px 14px; }
+.auth-switch { color: var(--muted); margin-top: 18px; }
+
+/* Account + team */
+.account { margin-top: auto; border-top: 1px solid var(--line); padding: 14px 8px 0; display: flex; flex-direction: column; gap: 10px; }
+.account-who { display: flex; flex-direction: column; line-height: 1.35; }
+.account-who span { font-size: 13px; color: var(--muted); }
+.team { list-style: none; margin: 0 0 12px; padding: 0; }
+.team li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.role { font-size: 12.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--lane); }
+.role-admin { background: var(--high-soft); color: var(--high); }
+.team-add h3 { font-size: 15px; margin: 16px 0 10px; }
+@media (max-width: 760px) {
+  .sidebar { flex-wrap: wrap; row-gap: 10px; }
+  .account { margin: 0; border: 0; padding: 0; flex-direction: row; }
+  .account-who { display: none; }
+  .account .row { flex-wrap: nowrap; gap: 6px; }
+  .job-select { order: 3; flex-basis: 100%; max-width: none; }
+  .shell { overflow-x: hidden; }
+}

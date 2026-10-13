@@ -1,4 +1,6 @@
 export * from './entities/stage.enum';
+export * from './entities/organization.entity';
+export * from './entities/user.entity';
 export * from './entities/job.entity';
 export * from './entities/candidate.entity';
 export * from './entities/stage-event.entity';

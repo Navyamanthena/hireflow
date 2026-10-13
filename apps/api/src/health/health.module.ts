@@ -1,10 +1,13 @@
 import { describeLlmConfig } from '@app/common';
 import { Controller, Get, Module, ServiceUnavailableException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { Public } from '../auth/auth.decorators';
 import { CandidatesModule } from '../candidates/candidates.module';
 import { OutboxRelay } from '../candidates/outbox.relay';
 import { ScoringProducer } from '../candidates/scoring.producer';
 
+/** Probes and public config: no token required. */
+@Public()
 @Controller()
 export class HealthController {
   constructor(

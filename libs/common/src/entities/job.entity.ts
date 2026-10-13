@@ -2,16 +2,29 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import type { Candidate } from './candidate.entity';
+import { Organization } from './organization.entity';
 
 @Entity('jobs')
+// Every job query is scoped by org; this serves the sidebar list directly.
+@Index('idx_jobs_org_created', ['orgId', 'createdAt'])
 export class Job {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column('uuid', { name: 'org_id' })
+  orgId: string;
+
+  @ManyToOne(() => Organization, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'org_id' })
+  org: Organization;
 
   @Column({ length: 200 })
   title: string;
