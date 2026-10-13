@@ -4,3 +4,4 @@ dist/
 .env
 web/dist/
 coverage/
+dump.rdb

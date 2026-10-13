@@ -109,12 +109,35 @@ export function CandidatePanel(props: {
                   <li className="muted">Nothing missing</li>
                 )}
               </ul>
+              {!!c.analysis.evidence?.length && (
+                <>
+                  <h3>From the resume</h3>
+                  <ul className="evidence">
+                    {c.analysis.evidence.map((e, i) => (
+                      <li key={i}>
+                        <span className="chip chip-match">{e.skill}</span>
+                        <q>{e.quote}</q>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {!!c.analysis.unverifiedEvidence && (
+                <p className="fine">
+                  {c.analysis.unverifiedEvidence} quote{c.analysis.unverifiedEvidence === 1 ? '' : 's'} from the
+                  model did not appear in the resume and {c.analysis.unverifiedEvidence === 1 ? 'was' : 'were'} removed.
+                </p>
+              )}
               <h3>Why this score</h3>
               <ul className="reasons">
                 {c.analysis.reasons.map((r, i) => (
                   <li key={i}>{r}</li>
                 ))}
               </ul>
+              <p className="fine">
+                Scored by {describeScorer(c.scoredBy)}
+                {c.scoringVersion > 1 ? `, run ${c.scoringVersion}` : ''}.
+              </p>
             </section>
           )}
 
@@ -183,4 +206,12 @@ export function CandidatePanel(props: {
       )}
     </aside>
   );
+}
+
+function describeScorer(scoredBy: string | null) {
+  if (!scoredBy) return 'an unknown scorer';
+  if (scoredBy === 'heuristic') return 'keyword matching (demo mode, not AI)';
+  const [provider, model] = scoredBy.split(':');
+  const name = provider === 'anthropic' ? 'Anthropic' : provider === 'openai' ? 'OpenAI' : provider;
+  return `${name} ${model ?? ''}`.trim();
 }

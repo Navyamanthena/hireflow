@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JobsModule } from '../jobs/jobs.module';
 import { CandidatesController } from './candidates.controller';
 import { CandidatesService } from './candidates.service';
+import { OutboxRelay } from './outbox.relay';
 import { ScoringProducer } from './scoring.producer';
 
 @Module({
@@ -14,7 +15,7 @@ import { ScoringProducer } from './scoring.producer';
     JobsModule,
   ],
   controllers: [CandidatesController],
-  providers: [CandidatesService, ScoringProducer],
-  exports: [ScoringProducer],
+  providers: [CandidatesService, ScoringProducer, OutboxRelay],
+  exports: [ScoringProducer, OutboxRelay],
 })
 export class CandidatesModule {}

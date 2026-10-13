@@ -50,8 +50,20 @@ export class Candidate {
   })
   scoringStatus: ScoringStatus;
 
+  /**
+   * Bumped on every scoring request. Jobs carry the version they were issued
+   * for, and the worker drops results for anything but the current version,
+   * so an older, slower run can never overwrite a newer one.
+   */
+  @Column('int', { name: 'scoring_version', default: 1 })
+  scoringVersion: number;
+
   @Column('int', { nullable: true })
   score: number | null;
+
+  /** Which provider produced the score, e.g. "anthropic:claude-haiku-5-5" or "heuristic". */
+  @Column({ name: 'scored_by', length: 120, nullable: true, type: 'varchar' })
+  scoredBy: string | null;
 
   /** Structured LLM output: matched/missing skills, reasons, summary. */
   @Column('jsonb', { nullable: true })

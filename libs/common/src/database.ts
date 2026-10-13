@@ -2,10 +2,12 @@ import type { DataSourceOptions } from 'typeorm';
 import { Candidate } from './entities/candidate.entity';
 import { Job } from './entities/job.entity';
 import { StageEvent } from './entities/stage-event.entity';
+import { OutboxEvent } from './entities/outbox-event.entity';
 import { InitialSchema1760000000000 } from './migrations/1760000000000-InitialSchema';
+import { ReliableScoring1791920662003 } from './migrations/1791920662003-ReliableScoring';
 
-export const ENTITIES = [Job, Candidate, StageEvent];
-export const MIGRATIONS = [InitialSchema1760000000000];
+export const ENTITIES = [Job, Candidate, StageEvent, OutboxEvent];
+export const MIGRATIONS = [InitialSchema1760000000000, ReliableScoring1791920662003];
 
 /** One place for DB config. Schema changes go through migrations, never synchronize. */
 export function databaseOptions(env: NodeJS.ProcessEnv = process.env): DataSourceOptions {

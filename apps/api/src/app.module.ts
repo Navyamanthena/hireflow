@@ -1,4 +1,4 @@
-import { databaseOptions, redisConnection } from '@app/common';
+import { databaseOptions, queuePrefix, redisConnection } from '@app/common';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -15,7 +15,7 @@ import { JobsModule } from './jobs/jobs.module';
       useFactory: () => ({ ...databaseOptions(), migrationsRun: true }),
     }),
     BullModule.forRootAsync({
-      useFactory: () => ({ connection: redisConnection() }),
+      useFactory: () => ({ connection: redisConnection(), prefix: queuePrefix() }),
     }),
     JobsModule,
     CandidatesModule,

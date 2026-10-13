@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, Job } from './api';
+import { api, Job, ScoringConfig } from './api';
 import { JobView } from './JobView';
 import { NewJobForm } from './NewJobForm';
 
@@ -8,6 +8,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scoring, setScoring] = useState<ScoringConfig | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -23,6 +24,7 @@ export function App() {
 
   useEffect(() => {
     void load();
+    api.config().then((c) => setScoring(c.scoring), () => undefined);
   }, [load]);
 
   const selected = jobs?.find((j) => j.id === selectedId) ?? null;
@@ -84,6 +86,17 @@ export function App() {
       </aside>
 
       <main className="main">
+        {scoring?.error && (
+          <div className="banner banner-error" role="alert">
+            Scoring is misconfigured: {scoring.error}.
+          </div>
+        )}
+        {scoring?.demoMode && !scoring.error && (
+          <div className="banner banner-demo">
+            Demo mode: resumes are scored by keyword matching, not AI. Set <code>LLM_PROVIDER</code> and an
+            API key to use an LLM.
+          </div>
+        )}
         {error && <div className="banner banner-error" role="alert">{error}</div>}
         {jobs === null && <p className="muted pad">Loading roles…</p>}
         {showForm && (

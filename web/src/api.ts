@@ -38,6 +38,15 @@ export interface Analysis {
   matchedSkills: string[];
   missingSkills: string[];
   reasons: string[];
+  evidence?: { skill: string; quote: string }[];
+  unverifiedEvidence?: number;
+}
+
+export interface ScoringConfig {
+  provider: 'anthropic' | 'openai' | 'heuristic';
+  model: string | null;
+  demoMode: boolean;
+  error?: string;
 }
 
 export interface StageEvent {
@@ -65,6 +74,8 @@ export interface Candidate extends CandidateSummary {
   analysis: Analysis | null;
   outreachDraft: string | null;
   scoringError: string | null;
+  scoringVersion: number;
+  scoredBy: string | null;
   events: StageEvent[];
 }
 
@@ -102,6 +113,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  config: () => call<{ scoring: ScoringConfig }>('/config'),
   listJobs: () => call<Job[]>('/jobs'),
   createJob: (data: { title: string; description: string }) =>
     call<Job>('/jobs', { method: 'POST', body: JSON.stringify(data) }),

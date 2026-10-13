@@ -19,13 +19,13 @@ export class ScoringProcessor extends WorkerHost {
   }
 
   async process(job: Job<ScoringJobData>) {
-    const { candidateId } = job.data;
+    const { candidateId, version } = job.data;
     const attempt = job.attemptsMade + 1;
     const maxAttempts = job.opts.attempts ?? 1;
 
     try {
-      const outcome = await this.scoring.score(candidateId);
-      this.logger.log(JSON.stringify({ event: job.name, candidateId, attempt, outcome }));
+      const outcome = await this.scoring.score(candidateId, version);
+      this.logger.log(JSON.stringify({ event: job.name, candidateId, version, attempt, outcome }));
       return outcome;
     } catch (error) {
       const permanent = ScoringService.isPermanent(error);
@@ -41,7 +41,7 @@ export class ScoringProcessor extends WorkerHost {
         }),
       );
       if (lastAttempt) {
-        await this.scoring.markFailed(candidateId, error);
+        await this.scoring.markFailed(candidateId, version, error);
         if (permanent) throw new UnrecoverableError((error as Error).message);
       }
       throw error;

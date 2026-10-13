@@ -4,7 +4,7 @@ import { ScoringProcessor } from './scoring.processor';
 import { ScoringService } from './scoring.service';
 
 function makeJob(attemptsMade: number, attempts = 4) {
-  return { name: 'resume.uploaded', data: { candidateId: 'c1' }, attemptsMade, opts: { attempts } } as any;
+  return { name: 'resume.uploaded', data: { candidateId: 'c1', version: 3 }, attemptsMade, opts: { attempts } } as any;
 }
 
 describe('ScoringProcessor retry policy', () => {
@@ -27,13 +27,19 @@ describe('ScoringProcessor retry policy', () => {
   it('marks the candidate failed on the final attempt', async () => {
     scoring.score.mockRejectedValue(new RetryableLlmError('503'));
     await expect(processor.process(makeJob(3))).rejects.toThrow('503');
-    expect(scoring.markFailed).toHaveBeenCalledWith('c1', expect.any(RetryableLlmError));
+    expect(scoring.markFailed).toHaveBeenCalledWith('c1', 3, expect.any(RetryableLlmError));
   });
 
   it('fails fast on permanent errors so retries are not wasted', async () => {
     scoring.score.mockRejectedValue(new PermanentLlmError('401 bad key'));
     await expect(processor.process(makeJob(0))).rejects.toBeInstanceOf(UnrecoverableError);
     expect(scoring.markFailed).toHaveBeenCalled();
+  });
+
+  it('passes the job version through to scoring', async () => {
+    scoring.score.mockResolvedValue({ kind: 'skipped', reason: 'superseded' });
+    await processor.process(makeJob(0));
+    expect(scoring.score).toHaveBeenCalledWith('c1', 3);
   });
 
   it('returns the outcome on success', async () => {

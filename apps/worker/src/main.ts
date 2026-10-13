@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { ScoringService } from './scoring.service';
 import { WorkerModule } from './worker.module';
 
 /**
@@ -9,7 +10,14 @@ import { WorkerModule } from './worker.module';
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(WorkerModule);
   app.enableShutdownHooks(); // finish in-flight jobs on SIGTERM
-  Logger.log('Scoring worker started', 'Bootstrap');
+  const provider = app.get(ScoringService).providerLabel;
+  Logger.log(`Scoring worker started (provider: ${provider})`, 'Bootstrap');
+  if (provider === 'heuristic') {
+    Logger.warn(
+      'DEMO MODE: scoring uses keyword matching, not an LLM. Set LLM_PROVIDER and an API key for AI scoring.',
+      'Bootstrap',
+    );
+  }
 }
 
 void bootstrap();

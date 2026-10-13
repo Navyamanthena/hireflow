@@ -8,6 +8,7 @@ const analysis = (score: number, matchedSkills: string[] = ['TypeScript']): Anal
   matchedSkills,
   missingSkills: [],
   reasons: ['test'],
+  evidence: [],
 });
 const rules = { advanceThreshold: 80, reviewThreshold: 50 };
 const candidate = { name: 'Navya Manthena' };

@@ -1,4 +1,4 @@
-import type { Analysis } from './analysis.schema';
+import type { Analysis, Evidence } from './analysis.schema';
 import type { LlmProvider } from './llm-provider';
 
 /**
@@ -45,6 +45,7 @@ const SKILLS: Record<string, RegExp> = {
 
 export class HeuristicProvider implements LlmProvider {
   readonly name = 'heuristic';
+  readonly label = 'heuristic';
 
   async analyze(jobDescription: string, resumeText: string): Promise<Analysis> {
     const required = Object.entries(SKILLS).filter(([, re]) => re.test(jobDescription));
@@ -61,10 +62,27 @@ export class HeuristicProvider implements LlmProvider {
 
     return {
       score,
-      summary: `Keyword-based estimate (offline heuristic provider). ${matched.length}/${required.length} required skills matched.`,
+      summary: `Keyword-based estimate (demo mode, no AI). ${matched.length}/${required.length} required skills matched.`,
       matchedSkills: matched,
       missingSkills: missing,
       reasons,
+      evidence: findEvidence(resumeText, matched),
     };
   }
+}
+
+/** Quote the resume line where each matched skill appears (first 6 skills). */
+function findEvidence(resumeText: string, matched: string[]): Evidence[] {
+  const lines = resumeText.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const out: Evidence[] = [];
+  for (const skill of matched.slice(0, 6)) {
+    const line = lines.find((l) => SKILLS[skill].test(l));
+    if (!line) continue;
+    const m = line.match(SKILLS[skill]);
+    const at = m?.index ?? 0;
+    const start = Math.max(0, at - 80);
+    const quote = line.slice(start, start + 200).trim();
+    if (quote.length >= 3 && !out.some((e) => e.quote === quote)) out.push({ skill, quote });
+  }
+  return out;
 }

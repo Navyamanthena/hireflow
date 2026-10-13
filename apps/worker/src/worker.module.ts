@@ -2,6 +2,7 @@ import {
   Candidate,
   createLlmProvider,
   databaseOptions,
+  queuePrefix,
   redisConnection,
   SCORING_QUEUE,
 } from '@app/common';
@@ -17,7 +18,7 @@ import { ScoringProcessor } from './scoring.processor';
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({ useFactory: () => databaseOptions() }),
     TypeOrmModule.forFeature([Candidate]),
-    BullModule.forRootAsync({ useFactory: () => ({ connection: redisConnection() }) }),
+    BullModule.forRootAsync({ useFactory: () => ({ connection: redisConnection(), prefix: queuePrefix() }) }),
     BullModule.registerQueue({ name: SCORING_QUEUE }),
   ],
   providers: [

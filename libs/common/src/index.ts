@@ -2,6 +2,7 @@ export * from './entities/stage.enum';
 export * from './entities/job.entity';
 export * from './entities/candidate.entity';
 export * from './entities/stage-event.entity';
+export * from './entities/outbox-event.entity';
 export * from './llm/analysis.schema';
 export * from './llm/llm-provider';
 export * from './llm/heuristic.provider';

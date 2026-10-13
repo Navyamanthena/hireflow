@@ -1,47 +1,44 @@
-import {
-  RESUME_RESCORE,
-  RESUME_UPLOADED,
-  SCORING_JOB_OPTIONS,
-  SCORING_QUEUE,
-  ScoringJobData,
-} from '@app/common';
+import { SCORING_JOB_OPTIONS, SCORING_QUEUE, ScoringEventType, ScoringJobData } from '@app/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bullmq';
 
+/** BullMQ retries commands forever while Redis is down, so every call is time-boxed. */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms).unref(),
+    ),
+  ]);
+}
+
 /**
- * Publishes scoring events. The API never calls the LLM itself: it returns
- * immediately and the worker service does the slow, failure-prone work.
+ * Thin wrapper over the queue. Only the outbox relay publishes through it;
+ * request handlers write outbox rows instead of talking to Redis directly.
  */
 @Injectable()
 export class ScoringProducer {
   constructor(@InjectQueue(SCORING_QUEUE) private readonly queue: Queue<ScoringJobData>) {}
 
-  async resumeUploaded(candidateId: string) {
-    // jobId = candidateId makes the event idempotent: a duplicate publish is a no-op.
-    await this.queue.add(RESUME_UPLOADED, { candidateId }, {
-      ...SCORING_JOB_OPTIONS,
-      jobId: `upload-${candidateId}`,
-    });
-  }
-
-  async rescore(candidateId: string) {
-    await this.queue.add(RESUME_RESCORE, { candidateId }, {
-      ...SCORING_JOB_OPTIONS,
-      jobId: `rescore-${candidateId}-${Date.now()}`,
-    });
-  }
-
   /**
-   * Queue depth doubles as a Redis health check. BullMQ retries commands
-   * forever while Redis is down, so cap the wait.
+   * jobId = outbox event id, so if the relay publishes the same event twice
+   * (crash after publish, before marking it sent) BullMQ ignores the duplicate.
    */
-  async stats(timeoutMs = 2000): Promise<Record<string, number>> {
-    return Promise.race([
+  async publish(type: ScoringEventType, data: ScoringJobData, eventId: string, timeoutMs = 2000) {
+    await withTimeout(
+      this.queue.add(type, data, { ...SCORING_JOB_OPTIONS, jobId: eventId }),
+      timeoutMs,
+      'Queue publish',
+    );
+  }
+
+  /** Queue depth doubles as a Redis health check. */
+  stats(timeoutMs = 2000): Promise<Record<string, number>> {
+    return withTimeout(
       this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed', 'completed'),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Redis timeout')), timeoutMs).unref(),
-      ),
-    ]);
+      timeoutMs,
+      'Redis',
+    );
   }
 }
