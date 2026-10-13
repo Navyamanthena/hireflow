@@ -97,6 +97,14 @@ LLM_PROVIDER=openai    OPENAI_API_KEY=sk-...          # default model: gpt-4o-mi
 LLM_MODEL=...                                          # optional override
 ```
 
+## Demo run (synthetic resumes)
+
+```bash
+npm run demo -- --api http://localhost:3000/api      # or: docker compose run --rm --no-deps -v ./scripts:/scripts api node /scripts/demo.mjs --api http://api:3000/api
+```
+
+This creates a demo team, a sample role and 12 invented resumes: strong, medium and weak fits, plus one prompt-injection attempt and one keyword-stuffed skills list. It waits for scoring, then prints a table and writes `scripts/demo-report.md`. In keyword demo mode, the keyword-stuffed resume scores highest. That's the failure mode the LLM provider and evidence checks exist to fix, so run it with a real key and compare.
+
 ## Tests
 
 ```bash

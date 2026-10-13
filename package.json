@@ -14,7 +14,8 @@
     "test": "jest",
     "test:e2e": "jest --config apps/api/test/jest-e2e.json --runInBand",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d libs/common/src/data-source.ts",
-    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d libs/common/src/data-source.ts"
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d libs/common/src/data-source.ts",
+    "demo": "node scripts/demo.mjs"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.5",

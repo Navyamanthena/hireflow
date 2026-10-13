@@ -5,3 +5,4 @@ dist/
 web/dist/
 coverage/
 dump.rdb
+scripts/demo-report.md
