@@ -413,6 +413,27 @@ describe('HireFlow (e2e)', () => {
       expect(c.scoringError).toMatch(/Could not start scoring: ECONNREFUSED/);
     });
 
+    it('never fails a run that another worker owns from the unclaimed-failure path', async () => {
+      const id = await insertPending('Owned Olga');
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const owner = new ScoringService(ds, fixedProvider(result(91, 'React and TypeScript'), gate));
+
+      // Worker B holds a valid claim and is mid-LLM-call...
+      const token = await owner.claim(id, 1);
+      const run = owner.run(id, token!);
+      // ...while worker A, whose own claim kept failing, gives up on the same version.
+      await owner.markFailedUnclaimed(id, 1, new Error('A could not reach the DB'));
+      expect((await http.get(`/api/candidates/${id}`)).body.scoringStatus).toBe('PROCESSING');
+
+      // B's legitimate result is still accepted.
+      release();
+      await expect(run).resolves.toMatchObject({ kind: 'scored', score: 91 });
+      const c = (await http.get(`/api/candidates/${id}`)).body;
+      expect(c.scoringStatus).toBe('SCORED');
+      expect(c.scoringError).toBeNull();
+    });
+
     it('watchdog fails stuck scoring but leaves fresh runs and undelivered events alone', async () => {
       const stuck = await insertPending('Stuck Stu');
       const fresh = await insertPending('Fresh Fred');
