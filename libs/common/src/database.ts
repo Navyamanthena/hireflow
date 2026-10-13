@@ -5,9 +5,14 @@ import { StageEvent } from './entities/stage-event.entity';
 import { OutboxEvent } from './entities/outbox-event.entity';
 import { InitialSchema1760000000000 } from './migrations/1760000000000-InitialSchema';
 import { ReliableScoring1791920662003 } from './migrations/1791920662003-ReliableScoring';
+import { ScoringAttemptToken1791921413773 } from './migrations/1791921413773-ScoringAttemptToken';
 
 export const ENTITIES = [Job, Candidate, StageEvent, OutboxEvent];
-export const MIGRATIONS = [InitialSchema1760000000000, ReliableScoring1791920662003];
+export const MIGRATIONS = [
+  InitialSchema1760000000000,
+  ReliableScoring1791920662003,
+  ScoringAttemptToken1791921413773,
+];
 
 /** One place for DB config. Schema changes go through migrations, never synchronize. */
 export function databaseOptions(env: NodeJS.ProcessEnv = process.env): DataSourceOptions {

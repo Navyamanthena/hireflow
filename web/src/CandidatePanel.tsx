@@ -92,6 +92,12 @@ export function CandidatePanel(props: {
 
           {c.analysis && (
             <section className="panel-section">
+              {c.analysis.reviewReason && (
+                <div className="banner banner-hold" role="note">
+                  Held for human review: {c.analysis.reviewReason}. Check the resume before moving this
+                  candidate forward.
+                </div>
+              )}
               <p className="summary">{c.analysis.summary}</p>
               <h3>Matches the role</h3>
               <ul className="chips">

@@ -5,9 +5,12 @@
  */
 import { INestApplication, INestApplicationContext } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
+import { Queue } from 'bullmq';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { Analysis, Candidate, LlmProvider, SCORING_QUEUE, ScoringStatus, Stage, StageEvent } from '@app/common';
 import { ScoringService } from '../../worker/src/scoring.service';
 import { WorkerModule } from '../../worker/src/worker.module';
 import { ScoringProducer } from '../src/candidates/scoring.producer';
@@ -211,31 +214,24 @@ describe('HireFlow (e2e)', () => {
         .expect(201);
       await waitUntil(res.body.id, (c) => c.scoringStatus === 'SCORED');
 
-      const statuses = (
-        await Promise.all(Array.from({ length: 6 }, () => http.post(`/api/candidates/${res.body.id}/rescore`)))
-      ).map((r) => r.status);
-      expect(statuses.filter((s) => s === 201)).toHaveLength(1);
-      expect(statuses.filter((s) => s === 409)).toHaveLength(5);
+      // Pause consumption so no worker can finish a run between the requests:
+      // the outcome then depends only on the atomic claim, not on timing.
+      const queue = app.get<Queue>(getQueueToken(SCORING_QUEUE));
+      await queue.pause();
+      try {
+        const statuses = (
+          await Promise.all(Array.from({ length: 6 }, () => http.post(`/api/candidates/${res.body.id}/rescore`)))
+        ).map((r) => r.status);
+        expect(statuses.filter((s) => s === 201)).toHaveLength(1);
+        expect(statuses.filter((s) => s === 409)).toHaveLength(5);
 
+        // Still blocked while the one accepted run waits in the queue.
+        await http.post(`/api/candidates/${res.body.id}/rescore`).expect(409);
+      } finally {
+        await queue.resume();
+      }
       const after = await waitUntil(res.body.id, (c) => c.scoringStatus === 'SCORED');
       expect(after.scoringVersion).toBe(2);
-    });
-
-    it('discards a result for a superseded scoring version', async () => {
-      const res = await http
-        .post(`/api/jobs/${job2}/candidates`)
-        .send({ name: 'Stale Sam', resumeText: 'React and TypeScript engineer, five years.' })
-        .expect(201);
-      await waitUntil(res.body.id, (c) => c.scoringStatus === 'SCORED');
-      await http.post(`/api/candidates/${res.body.id}/rescore`).expect(201);
-      const current = await waitUntil(res.body.id, (c) => c.scoringStatus === 'SCORED');
-
-      // A slow job for version 1 finishing late must not overwrite version 2.
-      const outcome = await worker.get(ScoringService).score(res.body.id, 1);
-      expect(outcome.kind).toBe('skipped');
-      const after = (await http.get(`/api/candidates/${res.body.id}`)).body;
-      expect(after.scoringVersion).toBe(2);
-      expect(after.updatedAt).toBe(current.updatedAt);
     });
 
     it('rescore 404s for unknown candidates', async () => {
@@ -266,6 +262,131 @@ describe('HireFlow (e2e)', () => {
       const third = await waitUntil(res.body.id, (c) => c.scoringStatus === 'SCORED' && c.scoringVersion === 3);
       expect(third.stage).toBe('NEEDS_REVIEW');
       expect(third.outreachDraft).toBeNull();
+    });
+  });
+
+  /**
+   * Race tests that drive ScoringService directly with controllable fake LLMs,
+   * so "slow worker finishes late" is reproduced exactly instead of by timing.
+   * Candidates are inserted straight into the DB (no outbox row), so the real
+   * worker never touches them.
+   */
+  describe('worker races and evidence gating', () => {
+    let ds: DataSource;
+    let jobId3: string;
+
+    const fixedProvider = (analysis: Analysis, gate?: Promise<void>): LlmProvider => ({
+      name: 'fake',
+      label: 'fake:test',
+      analyze: async () => {
+        await gate;
+        return analysis;
+      },
+    });
+    const result = (score: number, evidenceQuote: string): Analysis => ({
+      score,
+      summary: `fake score ${score}`,
+      matchedSkills: ['React'],
+      missingSkills: [],
+      reasons: ['fake'],
+      evidence: [{ skill: 'React', quote: evidenceQuote }],
+    });
+    const RESUME = 'Built a dashboard in React and TypeScript for 2,000 users.';
+
+    async function insertPending(name: string) {
+      const c = await ds.getRepository(Candidate).save({
+        jobId: jobId3,
+        name,
+        resumeText: RESUME,
+        stage: Stage.APPLIED,
+        scoringStatus: ScoringStatus.PENDING,
+        scoringVersion: 1,
+      });
+      await ds.getRepository(StageEvent).save({
+        candidateId: c.id,
+        fromStage: null,
+        toStage: Stage.APPLIED,
+        actor: 'user',
+        reason: 'Application received',
+      });
+      return c.id;
+    }
+
+    beforeAll(async () => {
+      ds = app.get(DataSource);
+      const res = await http
+        .post('/api/jobs')
+        .send({ title: 'Races', description: 'React engineer for internal dashboards and tools.' })
+        .expect(201);
+      jobId3 = res.body.id;
+    });
+
+    it('rejects a late result from a worker that lost ownership (same version)', async () => {
+      const id = await insertPending('Late Lee');
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const slow = new ScoringService(ds, fixedProvider(result(10, 'React and TypeScript'), gate));
+      const fast = new ScoringService(ds, fixedProvider(result(95, 'React and TypeScript')));
+
+      // Worker A claims and starts a slow LLM call...
+      const tokenA = await slow.claim(id, 1);
+      const runA = slow.run(id, tokenA!);
+      // ...BullMQ declares it stalled and worker B takes over the same version.
+      const tokenB = await fast.claim(id, 1);
+      expect(tokenB).not.toBe(tokenA);
+      await expect(fast.run(id, tokenB!)).resolves.toMatchObject({ kind: 'scored', score: 95 });
+
+      // A finally finishes. Its result must be discarded, not overwrite 95.
+      release();
+      await expect(runA).resolves.toMatchObject({ kind: 'skipped' });
+
+      const c = (await http.get(`/api/candidates/${id}`)).body;
+      expect(c.score).toBe(95);
+      expect(c.scoringStatus).toBe('SCORED');
+      expect(c.events.filter((e: any) => e.actor === 'system')).toHaveLength(1);
+    });
+
+    it('rejects a late failure from a worker that lost ownership', async () => {
+      const id = await insertPending('Failing Fran');
+      const a = new ScoringService(ds, fixedProvider(result(90, 'React and TypeScript')));
+      const tokenA = await a.claim(id, 1);
+      const tokenB = await a.claim(id, 1);
+      await a.run(id, tokenB!);
+      await a.markFailed(id, tokenA!, new Error('A timed out'));
+      const c = (await http.get(`/api/candidates/${id}`)).body;
+      expect(c.scoringStatus).toBe('SCORED');
+      expect(c.scoringError).toBeNull();
+    });
+
+    it('never runs a job whose version was superseded', async () => {
+      const id = await insertPending('Old Version');
+      await ds.query(`UPDATE candidates SET scoring_version = 2 WHERE id = $1`, [id]);
+      const svc = new ScoringService(ds, fixedProvider(result(99, 'React and TypeScript')));
+      expect(await svc.claim(id, 1)).toBeNull();
+    });
+
+    it('holds a high score with fabricated evidence for human review', async () => {
+      const id = await insertPending('Fabricated Fay');
+      const svc = new ScoringService(ds, fixedProvider(result(95, 'Led a 40-engineer Kafka migration at Google')));
+      await expect(svc.score(id, 1)).resolves.toMatchObject({ kind: 'scored', score: 95, stage: 'NEEDS_REVIEW' });
+
+      const c = (await http.get(`/api/candidates/${id}`)).body;
+      expect(c.stage).toBe('NEEDS_REVIEW');
+      expect(c.outreachDraft).toBeNull();
+      expect(c.analysis.evidence).toEqual([]);
+      expect(c.analysis.unverifiedEvidence).toBe(1);
+      expect(c.analysis.reviewReason).toMatch(/not found in the resume/);
+      expect(c.events.at(-1)).toMatchObject({ actor: 'system', toStage: 'NEEDS_REVIEW' });
+    });
+
+    it('auto-advances the same score when the evidence checks out', async () => {
+      const id = await insertPending('Verified Vic');
+      const svc = new ScoringService(ds, fixedProvider(result(95, 'dashboard in React and TypeScript')));
+      await svc.score(id, 1);
+      const c = (await http.get(`/api/candidates/${id}`)).body;
+      expect(c.stage).toBe('PHONE_SCREEN');
+      expect(c.outreachDraft).toContain('Hi Verified');
+      expect(c.analysis.reviewReason).toBeUndefined();
     });
   });
 });

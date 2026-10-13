@@ -8,42 +8,49 @@ function makeJob(attemptsMade: number, attempts = 4) {
 }
 
 describe('ScoringProcessor retry policy', () => {
-  let scoring: { score: jest.Mock; markFailed: jest.Mock };
+  let scoring: { claim: jest.Mock; run: jest.Mock; markFailed: jest.Mock };
   let processor: ScoringProcessor;
 
   beforeEach(() => {
-    scoring = { score: jest.fn(), markFailed: jest.fn() };
+    scoring = { claim: jest.fn().mockResolvedValue('tok-1'), run: jest.fn(), markFailed: jest.fn() };
     processor = new ScoringProcessor(scoring as unknown as ScoringService);
     jest.spyOn((processor as any).logger, 'warn').mockImplementation(() => undefined);
     jest.spyOn((processor as any).logger, 'log').mockImplementation(() => undefined);
   });
 
   it('rethrows retryable errors without marking failed before the last attempt', async () => {
-    scoring.score.mockRejectedValue(new RetryableLlmError('429'));
+    scoring.run.mockRejectedValue(new RetryableLlmError('429'));
     await expect(processor.process(makeJob(0))).rejects.toThrow('429');
     expect(scoring.markFailed).not.toHaveBeenCalled();
   });
 
   it('marks the candidate failed on the final attempt', async () => {
-    scoring.score.mockRejectedValue(new RetryableLlmError('503'));
+    scoring.run.mockRejectedValue(new RetryableLlmError('503'));
     await expect(processor.process(makeJob(3))).rejects.toThrow('503');
-    expect(scoring.markFailed).toHaveBeenCalledWith('c1', 3, expect.any(RetryableLlmError));
+    expect(scoring.markFailed).toHaveBeenCalledWith('c1', 'tok-1', expect.any(RetryableLlmError));
   });
 
   it('fails fast on permanent errors so retries are not wasted', async () => {
-    scoring.score.mockRejectedValue(new PermanentLlmError('401 bad key'));
+    scoring.run.mockRejectedValue(new PermanentLlmError('401 bad key'));
     await expect(processor.process(makeJob(0))).rejects.toBeInstanceOf(UnrecoverableError);
     expect(scoring.markFailed).toHaveBeenCalled();
   });
 
-  it('passes the job version through to scoring', async () => {
-    scoring.score.mockResolvedValue({ kind: 'skipped', reason: 'superseded' });
+  it('claims the job version and runs with the issued token', async () => {
+    scoring.run.mockResolvedValue({ kind: 'scored', score: 1, stage: 'APPLIED', automated: false });
     await processor.process(makeJob(0));
-    expect(scoring.score).toHaveBeenCalledWith('c1', 3);
+    expect(scoring.claim).toHaveBeenCalledWith('c1', 3);
+    expect(scoring.run).toHaveBeenCalledWith('c1', 'tok-1');
+  });
+
+  it('skips without calling the LLM when the claim fails', async () => {
+    scoring.claim.mockResolvedValue(null);
+    await expect(processor.process(makeJob(0))).resolves.toMatchObject({ kind: 'skipped' });
+    expect(scoring.run).not.toHaveBeenCalled();
   });
 
   it('returns the outcome on success', async () => {
-    scoring.score.mockResolvedValue({ kind: 'scored', score: 90, stage: 'PHONE_SCREEN', automated: true });
+    scoring.run.mockResolvedValue({ kind: 'scored', score: 90, stage: 'PHONE_SCREEN', automated: true });
     await expect(processor.process(makeJob(0))).resolves.toMatchObject({ score: 90 });
   });
 });

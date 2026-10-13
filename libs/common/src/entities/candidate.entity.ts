@@ -58,6 +58,14 @@ export class Candidate {
   @Column('int', { name: 'scoring_version', default: 1 })
   scoringVersion: number;
 
+  /**
+   * Ownership token for the run currently allowed to write a result. Each
+   * claim issues a fresh token; a worker whose token was superseded (e.g. a
+   * stalled job that BullMQ handed to another worker) can no longer write.
+   */
+  @Column('uuid', { name: 'scoring_attempt', nullable: true })
+  scoringAttempt: string | null;
+
   @Column('int', { nullable: true })
   score: number | null;
 

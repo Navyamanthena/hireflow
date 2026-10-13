@@ -23,6 +23,8 @@ export type Evidence = z.infer<typeof EvidenceSchema>;
 export type Analysis = z.infer<typeof AnalysisSchema> & {
   /** How many model-supplied quotes were dropped because they are not in the resume. */
   unverifiedEvidence?: number;
+  /** Set when automation was withheld because the AI's claims couldn't be verified. */
+  reviewReason?: string;
 };
 
 /** Pull the first JSON object out of a model response (handles ```json fences). */

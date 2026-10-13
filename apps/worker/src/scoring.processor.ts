@@ -23,8 +23,15 @@ export class ScoringProcessor extends WorkerHost {
     const attempt = job.attemptsMade + 1;
     const maxAttempts = job.opts.attempts ?? 1;
 
+    const token = await this.scoring.claim(candidateId, version);
+    if (!token) {
+      const outcome = { kind: 'skipped', reason: 'superseded, deleted or already finished' };
+      this.logger.log(JSON.stringify({ event: job.name, candidateId, version, attempt, outcome }));
+      return outcome;
+    }
+
     try {
-      const outcome = await this.scoring.score(candidateId, version);
+      const outcome = await this.scoring.run(candidateId, token);
       this.logger.log(JSON.stringify({ event: job.name, candidateId, version, attempt, outcome }));
       return outcome;
     } catch (error) {
@@ -41,7 +48,7 @@ export class ScoringProcessor extends WorkerHost {
         }),
       );
       if (lastAttempt) {
-        await this.scoring.markFailed(candidateId, version, error);
+        await this.scoring.markFailed(candidateId, token, error);
         if (permanent) throw new UnrecoverableError((error as Error).message);
       }
       throw error;
