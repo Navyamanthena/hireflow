@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hireflow
+      POSTGRES_PASSWORD: hireflow
+      POSTGRES_DB: hireflow
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hireflow"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: { context: ., args: { APP: api } }
+    environment: &backend-env
+      DATABASE_URL: postgres://hireflow:hireflow@postgres:5432/hireflow
+      REDIS_HOST: redis
+      LLM_PROVIDER: ${LLM_PROVIDER:-heuristic}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: { context: ., args: { APP: worker } }
+    environment: *backend-env
+    depends_on:
+      api: { condition: service_started } # api runs migrations first
+    deploy:
+      replicas: 2 # scale scoring independently of the API
+
+  web:
+    build: ./web
+    ports: ["8080:80"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
